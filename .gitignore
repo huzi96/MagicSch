@@ -16,5 +16,7 @@ mdriver.c
 memlib.c
 memlib.h
 mm-naive.c
+cscope.file
+cscope*
 mm.h
 traces/
