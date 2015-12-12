@@ -42,6 +42,9 @@
 #define CHUNKSIZE  (1<<12)
 #define SETW(addr, value)	(*(unsigned int *)(addr) = (value))
 #define PACK(size, bits)	( (size) | (bits) )
+
+#define GET(p)       		(*(unsigned int *)(p))
+#define GET_ALLOC(p) 		(GET(p) & 0x1)
 #define GET_SIZE(p)			(GET(p) & ~0x7)
 #define HDRP(bp)			((char *)(bp) - WSIZE)
 #define FTRP(bp)			((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
@@ -49,13 +52,16 @@
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp) 		((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) 		((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
-#defin Max(a, b) ((a > b)? a:b)
+#define MAX(a, b) ((a > b)? a:b)
 static char *heap_listp;
 
-int heap_extend(int num);
 static void* coalesce(void *bp);
-static void* heap_extend(int num);
-
+static void* heap_extend(size_t num);
+static void * find_free_block(size_t asize);
+static void place(void *bp, size_t size);
+static void printblock(void *bp); 
+void mm_checkheap(int verbose);
+static void checkblock(void *bp);
 
 /*
  * Initialize: return -1 on error, 0 on success.
@@ -102,7 +108,7 @@ void *malloc (size_t size)
 	void *free_blk = find_free_block(alloc_size);
 	if (free_blk == NULL)
 	{
-		size_t extendsize = MAX(asize, CHUNKSIZE); 
+		size_t extendsize = MAX(alloc_size, CHUNKSIZE); 
 		if( (free_blk = heap_extend(extendsize)) == (void *)-1 )
 			return NULL;
 	}
@@ -113,7 +119,7 @@ void *malloc (size_t size)
 static void place(void *bp, size_t size)
 {
 	int original_size = GET_SIZE(bp);
-	if (original_size - size < DWORD*2)
+	if (original_size - size < DSIZE*2)
 	{
 		SETW(HDRP(bp), PACK(original_size, 1));
 		SETW(FTRP(bp), PACK(original_size, 1));
@@ -123,8 +129,8 @@ static void place(void *bp, size_t size)
 		SETW(HDRP(bp), PACK(size, 1));
 		SETW(FTRP(bp), PACK(size, 1));
 		bp = NEXT_BLKP(bp);
-		SETW(HDRP(bp), PACK(original_size - size), 0);
-		SETW(FTRP(bp), PACK(original_size - size), 0);
+		SETW(HDRP(bp), PACK(original_size - size, 0));
+		SETW(FTRP(bp), PACK(original_size - size, 0));
 	}
 }
 
@@ -150,25 +156,28 @@ void *realloc(void *oldptr, size_t size)
 	void *newptr;
 
 	/* If size == 0 then this is just free, and we return NULL. */
-	if(size == 0) {
-	free(oldptr);
-	return 0;
+	if(size == 0) 
+	{
+		free(oldptr);
+		return 0;
 	}
 
 	/* If oldptr is NULL, then this is just malloc. */
-	if(oldptr == NULL) {
-	return malloc(size);
+	if(oldptr == NULL) 
+	{
+		return malloc(size);
 	}
 
 	newptr = malloc(size);
 
 	/* If realloc() fails the original block is left untouched  */
-	if(!newptr) {
-	return 0;
+	if(!newptr) 
+	{
+		return 0;
 	}
 
 	/* Copy the old data. */
-	oldsize = *SIZE_PTR(oldptr);
+	oldsize = GET_SIZE(oldptr);
 	if(size < oldsize) oldsize = size;
 	memcpy(newptr, oldptr, oldsize);
 
@@ -213,7 +222,7 @@ static void printblock(void *bp)
 {
     size_t hsize, halloc, fsize, falloc;
 
-    checkheap(0);
+    mm_checkheap(0);
     hsize = GET_SIZE(HDRP(bp));
     halloc = GET_ALLOC(HDRP(bp));  
     fsize = GET_SIZE(FTRP(bp));
@@ -267,18 +276,18 @@ void mm_checkheap(int verbose)
 /*
  * Extend the heap by num blocks
  */
-static void* heap_extend(int num)
+static void* heap_extend(size_t num)
 {
 	size_t size = WSIZE * ( num%2 ? num+1 : num );
  	void *result = mem_sbrk(size);
  	if (result == (void *)-1)
- 		return -1;
+ 		return (void *)-1;
  	//set up a free block here
  	SETW( HDRP(result), WSIZE*num);
  	SETW( FTRP(result), WSIZE*num);
  	SETW( HDRP( NEXT_BLKP(result) ), PACK(0, 1));
 
- 	return coalesce(bp);;
+ 	return coalesce(result);
 }
 
 static void* coalesce(void *bp)
@@ -306,8 +315,8 @@ static void* coalesce(void *bp)
 	    case 0:
 	    	size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
             GET_SIZE(FTRP(NEXT_BLKP(bp)));
-	        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-	        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+	        SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+	        SETW(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
 	        bp = PREV_BLKP(bp);
 	        break;
     }
