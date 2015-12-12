@@ -15,7 +15,7 @@
 
 /* If you want debugging output, use the following macro.  When you hand
  * in, remove the #define DEBUG line. */
-#define DEBUG
+//#define DEBUG
 #ifdef DEBUG
 # define dbg_printf(...) printf(__VA_ARGS__)
 #else
@@ -53,20 +53,21 @@
 #define NEXT_BLKP(bp) 		((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) 		((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 #define MAX(a, b) ((a > b)? a:b)
-static char *heap_listp;
+
+static char *heap_listp = NULL;
 
 static void* coalesce(void *bp);
 static void* heap_extend(size_t num);
 static void * find_free_block(size_t asize);
 static void place(void *bp, size_t size);
-static void printblock(void *bp); 
+static void printblock(void *bp);
 void mm_checkheap(int verbose);
 static void checkblock(void *bp);
 
 /*
  * Initialize: return -1 on error, 0 on success.
  */
-int mm_init(void) 
+int mm_init(void)
 {
 	//setting up prologue
 
@@ -90,7 +91,7 @@ int mm_init(void)
 /*
  * malloc
  */
-void *malloc (size_t size) 
+void *malloc (size_t size)
 {
 	if (heap_listp == 0)
 	{
@@ -103,22 +104,25 @@ void *malloc (size_t size)
 	if (size < 8)
 		alloc_size = DSIZE * 2;
 	else
-		alloc_size = ALIGN(size + WSIZE);
+		alloc_size = ALIGN(size + DSIZE);
 
 	void *free_blk = find_free_block(alloc_size);
 	if (free_blk == NULL)
 	{
-		size_t extendsize = MAX(alloc_size, CHUNKSIZE); 
+		size_t extendsize = MAX(alloc_size, CHUNKSIZE);
 		if( (free_blk = heap_extend(extendsize)) == (void *)-1 )
 			return NULL;
 	}
-	place(free_blk, size);
+	dbg_printf("\n [ Mallocing Block ] \nsize\t%ld\talloc_s\t%ld\n",size, alloc_size);
+
+	place(free_blk, alloc_size);
+
     return free_blk;
 }
 
 static void place(void *bp, size_t size)
 {
-	int original_size = GET_SIZE(bp);
+	int original_size = GET_SIZE(HDRP(bp));
 	if (original_size - size < DSIZE*2)
 	{
 		SETW(HDRP(bp), PACK(original_size, 1));
@@ -137,33 +141,37 @@ static void place(void *bp, size_t size)
 /*
  * free
  */
-void free (void *ptr) 
+void free (void *ptr)
 {
+	dbg_printf("\n [Freeing Block] \n");
+
     if(!ptr) return;
 
-    size_t size = GET_SIZE(ptr);
+    size_t size = GET_SIZE(HDRP(ptr));
     SETW(HDRP(ptr), PACK(size, 0));
     SETW(FTRP(ptr), PACK(size, 0));
     coalesce(ptr);
+
+    dbg_printf("\n [End OF Freeing] \n");
 }
 
 /*
  * realloc - you may want to look at mm-naive.c
  */
-void *realloc(void *oldptr, size_t size) 
+void *realloc(void *oldptr, size_t size)
 {
 	size_t oldsize;
 	void *newptr;
 
 	/* If size == 0 then this is just free, and we return NULL. */
-	if(size == 0) 
+	if(size == 0)
 	{
 		free(oldptr);
 		return 0;
 	}
 
 	/* If oldptr is NULL, then this is just malloc. */
-	if(oldptr == NULL) 
+	if(oldptr == NULL)
 	{
 		return malloc(size);
 	}
@@ -171,13 +179,13 @@ void *realloc(void *oldptr, size_t size)
 	newptr = malloc(size);
 
 	/* If realloc() fails the original block is left untouched  */
-	if(!newptr) 
+	if(!newptr)
 	{
 		return 0;
 	}
 
 	/* Copy the old data. */
-	oldsize = GET_SIZE(oldptr);
+	oldsize = GET_SIZE(HDRP(oldptr));
 	if(size < oldsize) oldsize = size;
 	memcpy(newptr, oldptr, oldsize);
 
@@ -192,7 +200,7 @@ void *realloc(void *oldptr, size_t size)
  * This function is not tested by mdriver, but it is
  * needed to run the traces.
  */
-void *calloc (size_t nmemb, size_t size) 
+void *calloc (size_t nmemb, size_t size)
 {
 	size_t alloc_size = nmemb * size;
 	void *bp = malloc(alloc_size);
@@ -217,39 +225,63 @@ static int aligned(const void *p) {
     return (size_t)ALIGN(p) == (size_t)p;
 }
 
+static void printBlockDetail(void *bp)
+{
+	dbg_printf("Block\t0x%lx\nHeader\t0x%x\nSize\t0x%lx\n", bp, GET(HDRP(bp)), GET_SIZE(HDRP(bp)));
+    dbg_printf("FT ADDR\t0x%lx\n", FTRP(bp));
+    dbg_printf("Footer\t0x%x\n\n",GET(FTRP(bp)));
+}
 
-static void printblock(void *bp) 
+static void printblock(void *bp)
 {
     size_t hsize, halloc, fsize, falloc;
 
     mm_checkheap(0);
     hsize = GET_SIZE(HDRP(bp));
-    halloc = GET_ALLOC(HDRP(bp));  
+    halloc = GET_ALLOC(HDRP(bp));
     fsize = GET_SIZE(FTRP(bp));
-    falloc = GET_ALLOC(FTRP(bp));  
+    falloc = GET_ALLOC(FTRP(bp));
 
     if (hsize == 0) {
         printf("%p: EOL\n", bp);
         return;
     }
 
-    printf("%p: header: [%ld:%c] footer: [%ld:%c]\n", bp, 
-           hsize, (halloc ? 'a' : 'f'), 
-           fsize, (falloc ? 'a' : 'f')); 
-}
+    printf("%p: header: [%ld:%c] footer: [%ld:%c]\n", bp,
+           hsize, (halloc ? 'a' : 'f'),
+           fsize, (falloc ? 'a' : 'f'));
+    printBlockDetail(bp);
 
-static void checkblock(void *bp) 
+}
+static void dump_heap()
+{
+	void *bp;
+	dbg_printf("\n [Start Dumping Heap]\n");
+	for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) 
+	{
+	 	printBlockDetail(bp);
+    }
+    dbg_printf("\n [Dumping Complete] \n");
+}
+static void checkblock(void *bp)
 {
     if ((size_t)bp % 8)
-        printf("Error: %p is not doubleword aligned\n", bp);
-    if (GET(HDRP(bp)) != GET(FTRP(bp)))
-        printf("Error: header does not match footer\n");
+        printf("Error: %lx is not doubleword aligned\n", bp);
+
+   	if ( GET(HDRP(bp)) != GET(FTRP(bp)))
+   	{
+   		dump_heap();
+   		printf("Error: header does not match footer\n");
+   	}
+
+ 	
+
 }
 
 /*
  * mm_checkheap
  */
-void mm_checkheap(int verbose) 
+void mm_checkheap(int verbose)
 {
     char *bp = heap_listp;
 
@@ -261,7 +293,7 @@ void mm_checkheap(int verbose)
     checkblock(heap_listp);
 
     for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        if (verbose) 
+        if (verbose)
             printblock(bp);
         checkblock(bp);
     }
@@ -301,7 +333,7 @@ static void* coalesce(void *bp)
     {
     	case 3:
     		return bp;
-    	case 2:
+    	case 2://next allocated
     		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         	SETW(FTRP(bp), PACK(size, 0));
         	SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
@@ -313,7 +345,7 @@ static void* coalesce(void *bp)
 	        SETW(FTRP(bp), PACK(size,0));
 	        break;
 	    case 0:
-	    	size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
+	    	size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
             GET_SIZE(FTRP(NEXT_BLKP(bp)));
 	        SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 	        SETW(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
