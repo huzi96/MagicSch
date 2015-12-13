@@ -32,6 +32,28 @@
 #define calloc mm_calloc
 #endif /* def DRIVER */
 
+/* constants for segregated list */ 
+#define SIZE0 (3)
+#define SIZE1 (1<<2)
+#define SIZE2 (1<<3)
+#define SIZE3 (1<<4)
+#define SIZE4 (1<<5)
+#define SIZE5 (1<<6)
+#define SIZE6 (1<<7)
+#define SIZE7 (1<<8)
+#define SIZE8 (1<<9)
+#define SIZE9 (1<<10)
+#define SIZE10 (1<<11)
+#define SIZE11 (1<<12)
+#define SIZE12 (1<<13)
+#define SIZE13 (1<<14)
+#define SIZE14 (1<<15)
+#define SIZE15 (1<<16)
+
+#define SYS_WORD 8
+#define PTR_NUM 16
+#define PTRSEG 128//16*8
+
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
 
@@ -56,13 +78,22 @@
 #define MAX(a, b) 			((a > b)? a:b)
 
 /* pointer operator */
-#define PRED(bp)			((void **)bp)
-#define SUCC(bp)			((void **)bp + 1)
-#define SETD(addr, value)	(*(unsigned long long *)(addr) = (value))
-#define GETD(addr)			(*(unsigned long long *)(addr))
+#define PRED(bp)			((unsigned long *)bp)
+#define SUCC(bp)			((unsigned long *)bp + 1)
+#define SETD(addr, value)	(*(unsigned long *)(addr) = (value))
+#define GETD(addr)			(*(unsigned long *)(addr))
+
+#define LIST_END	((unsigned long *)-2)
+#define GEN_ALLOCSIZE(cl)	( cl==0 ? 3:(1<<(cl+1)) )
+/* complex helper macro */
+#define CLASS_BP(bp)		get_class( GET_SIZE(HDRP(bp))/WSIZE )
+
+typedef unsigned long * ptr_t
 
 static char *heap_listp = NULL;
 static void *free_list = NULL;
+
+static ptr_t ptrs = NULL;
 
 static void* coalesce(void *bp);
 static void* heap_extend(size_t num);
@@ -72,6 +103,100 @@ static void printblock(void *bp);
 void mm_checkheap(int verbose);
 static void checkblock(void *bp);
 
+/* get the ptr to No.x list */
+/* 这个是获取指针,也就是第num表项的值 */
+static ptr_t get_list_ptr(int num)
+{
+	if (ptrs == NULL)
+	{
+		return (ptr_t)-1;
+	}
+	return (ptr_t)GETD( (ptr_t)ptrs + num );
+}
+
+static void append(int list_num, void *bp)
+{
+	ptr_t ptr = get_list_ptr(list_num);
+	if (ptr == (ptr_t)-1)
+	{
+		dbg_printf("Pointer set Error\n");
+		return;
+	}
+
+	if (GETD(ptr) == LIST_END)
+	{
+		SETD( ptr, bp);
+		return;
+	}
+
+	void* crt_bp = (void *)GETD(GETD(ptr));//the first bp
+	while(1)
+	{
+		if ( GETD(SUCC(crt))==LIST_END )
+		{
+			SETD(SUCC(crt), bp);
+			SETD(PRED(bp), crt);
+			SETD(SUCC(bp), LIST_END);
+			break;
+		}
+		crt = GETD(SUCC(crt));
+	}
+}
+
+static void remove(int list_num, void *bp)
+{
+	ptr_t ptr = get_list_ptr(list_num);
+	if (ptr == (ptr_t)-1)
+	{
+		dbg_printf("Pointer set Error\n");
+		return;
+	}
+
+	void *crt_bp = (void *)GETD(GETD(ptr));
+	while(1)
+	{
+		if ( crt_bp == bp)//item to remove
+		{
+			void* pre_bp = (void *)GETD(PRED(bp));
+			SETD( SUCC(pre_bp), GETD( SUCC(crt_bp) ) );
+			if ( GETD(SUCC(pre_bp)) == LIST_END ) break;
+			
+			void *suc_bp = (void *)GETD(SUCC(bp));
+			SETD( PRED(suc_bp), GETD( PRED(crt_bp) ) );
+			break;
+		}
+		crt_bp = (void *)GETD(SUCC(crt_bp));
+	}
+
+}
+
+static int get_class(int block_num)
+{
+	if (block_num >= SIZE15)
+	{
+		return 15;
+	}
+	if (block_num <=3 )
+	{
+		return 0;
+	}
+	int res = block_num;
+	res --;
+	res |= res >> 1;
+	res |= res >> 2;
+	res |= res >> 4;
+	res |= res >> 8;
+	res |= res >> 16;
+	res++;
+	int cnt=0;
+	while(res)
+	{
+		res>>=1;
+		cnt++;
+	}
+	cnt--;
+	return cnt;
+}
 /*
  * Initialize: return -1 on error, 0 on success.
  */
@@ -79,7 +204,18 @@ int mm_init(void)
 {
 	//setting up prologue
 
-	//request for two DWORD
+	//request for the initial ptrs and initialized 0
+	if ( ( ptrs = (mem_sbrk(PTRSEG) ) == (void *)-1 ) )
+		return -1;
+
+	/* set all to list end at first */
+	int i;
+	for (i = 0; i < PTR_NUM; ++i)
+	{
+		SETD( get_list_ptr(i), LIST_END);
+	}
+
+
 	if ( (heap_listp = (char *)mem_sbrk(4*WSIZE)) == (char *)-1 )
 		return -1;
 	SETW( heap_listp, 0);//padding
@@ -110,12 +246,14 @@ void *malloc (size_t size)
 
 	if (size <=0 )//ignore
 		return NULL;
-	if (size < 8)
-		alloc_size = DSIZE * 2;
-	else
-		alloc_size = ALIGN(size + DSIZE);
 
-	void *free_blk = find_free_block(alloc_size);
+	int class_num = get_class(size/WSIZE);
+	
+	alloc_size = GEN_ALLOCSIZE(class_num);
+
+	/* Notice the semantic of find_free_block has changend */
+	void *free_blk = find_free_block(class_num);
+
 	if (free_blk == NULL)
 	{
 		size_t extendsize = MAX(alloc_size, CHUNKSIZE);
@@ -139,9 +277,13 @@ static void place(void *bp, size_t size)
 	}
 	else
 	{
+		int this_class = CLASS_BP(bp);
+		remove(this_class, bp);
 		SETW(HDRP(bp), PACK(size, 1));
 		SETW(FTRP(bp), PACK(size, 1));
 		bp = NEXT_BLKP(bp);
+		int next_class = CLASS_BP(bp);
+		append(next_classm, bp);
 		SETW(HDRP(bp), PACK(original_size - size, 0));
 		SETW(FTRP(bp), PACK(original_size - size, 0));
 	}
@@ -239,7 +381,8 @@ static void printBlockDetail(void *bp)
 {
 	dbg_printf("Block\t0x%lx\nHeader\t0x%x\nSize\t0x%lx\n", bp, GET(HDRP(bp)), GET_SIZE(HDRP(bp)));
     dbg_printf("FT ADDR\t0x%lx\n", FTRP(bp));
-    dbg_printf("Footer\t0x%x\n\n",GET(FTRP(bp)));
+    dbg_printf("Footer\t0x%x\n",GET(FTRP(bp)));
+    dbg_printf("Class\t%d\n\n", CLASS_BP(bp));
 }
 
 static void printblock(void *bp)
@@ -273,6 +416,7 @@ static void dump_heap()
     }
     dbg_printf("\n [Dumping Complete] \n");
 }
+
 static void checkblock(void *bp)
 {
     if ((size_t)bp % 8)
@@ -324,10 +468,14 @@ static void* heap_extend(size_t num)
  	if (result == (void *)-1)
  		return (void *)-1;
  	//set up a free block here
+ 	//and set up ptrs
  	SETW( HDRP(result), WSIZE*num);
  	SETW( FTRP(result), WSIZE*num);
  	SETW( HDRP( NEXT_BLKP(result) ), PACK(0, 1));
 
+ 	/* determine which class */
+ 	int cata = get_class(num);
+ 	append(cata, result);
  	return coalesce(result);
 }
 
@@ -343,17 +491,27 @@ static void* coalesce(void *bp)
     	case 3:
     		return bp;
     	case 2://next allocated
+    		//remove pre
+    		remove( CLASS_BP(PREV_BLKP(bp)), PREV_BLKP(bp) );
+    		remove( CLASS_BP(bp), bp );
     		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         	SETW(FTRP(bp), PACK(size, 0));
         	SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         	bp = PREV_BLKP(bp);
         	break;
-        case 1:
+        case 1://pre allocated
+        	//remove next
+        	remove( CLASS_BP(NEXT_BLKP(bp)), NEXT_BLKP(bp) );
+        	remove( CLASS_BP(bp), bp );
         	size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
 	        SETW(HDRP(bp), PACK(size, 0));
 	        SETW(FTRP(bp), PACK(size,0));
+	        
 	        break;
-	    case 0:
+	    case 0://none allocated
+		    remove( CLASS_BP(PREV_BLKP(bp)), PREV_BLKP(bp) );
+		    remove( CLASS_BP(NEXT_BLKP(bp)), NEXT_BLKP(bp) );
+		    remove( CLASS_BP(bp), bp );
 	    	size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
             GET_SIZE(FTRP(NEXT_BLKP(bp)));
 	        SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
@@ -361,17 +519,27 @@ static void* coalesce(void *bp)
 	        bp = PREV_BLKP(bp);
 	        break;
     }
+    /* set up ptrs */
+	append( CLASS_BP(bp), bp);
+
     return bp;
 }
 
-static void * find_free_block(size_t asize)
+static void * find_free_block(int class_num)
 {
-	void *bp;
-
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
-            return bp;
-        }
-    }
-    return NULL;
+	void *ptr = get_list_ptr(class_num);
+	void *bp = (void *)GETD(ptr);
+	int try_class = class_num;
+	while(bp == LIST_END)
+	{
+		if (try_class >15 )
+		{
+			return NULL;
+		}
+		try_class++;
+		ptr = get_list_ptr(try_class);
+		bp = (void *)GETD(ptr);
+	}
+	remove(class_num, bp);
+    return bp;
 }
