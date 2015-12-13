@@ -4,6 +4,7 @@
  * NOTE TO STUDENTS: Replace this header comment with your own header
  * comment that gives a high level description of your solution.
  */
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,9 +53,16 @@
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp) 		((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) 		((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
-#define MAX(a, b) ((a > b)? a:b)
+#define MAX(a, b) 			((a > b)? a:b)
+
+/* pointer operator */
+#define PRED(bp)			((void **)bp)
+#define SUCC(bp)			((void **)bp + 1)
+#define SETD(addr, value)	(*(unsigned long long *)(addr) = (value))
+#define GETD(addr)			(*(unsigned long long *)(addr))
 
 static char *heap_listp = NULL;
+static void *free_list = NULL;
 
 static void* coalesce(void *bp);
 static void* heap_extend(size_t num);
@@ -85,6 +93,7 @@ int mm_init(void)
 	if (new_block == (void *) -1)
 		return -1;
 	heap_listp += (2*WSIZE);
+	free_list = new_block;
     return 0;
 }
 
@@ -110,7 +119,7 @@ void *malloc (size_t size)
 	if (free_blk == NULL)
 	{
 		size_t extendsize = MAX(alloc_size, CHUNKSIZE);
-		if( (free_blk = heap_extend(extendsize)) == (void *)-1 )
+		if( (free_blk = heap_extend(extendsize/WSIZE)) == (void *)-1 )
 			return NULL;
 	}
 	dbg_printf("\n [ Mallocing Block ] \nsize\t%ld\talloc_s\t%ld\n",size, alloc_size);
@@ -145,7 +154,8 @@ void free (void *ptr)
 {
 	dbg_printf("\n [Freeing Block] \n");
 
-    if(!ptr) return;
+
+    if((size_t) ptr<=0) return;
 
     size_t size = GET_SIZE(HDRP(ptr));
     SETW(HDRP(ptr), PACK(size, 0));
@@ -274,8 +284,6 @@ static void checkblock(void *bp)
    		printf("Error: header does not match footer\n");
    	}
 
- 	
-
 }
 
 /*
@@ -307,6 +315,7 @@ void mm_checkheap(int verbose)
 
 /*
  * Extend the heap by num blocks
+ * Modify To support explicit list
  */
 static void* heap_extend(size_t num)
 {
