@@ -1,6 +1,7 @@
 /*
  * mm.c
- *
+ * ID:	1400012817
+
  * NOTE TO STUDENTS: Replace this header comment with your own header
  * comment that gives a high level description of your solution.
  */
@@ -16,7 +17,7 @@
 
 /* If you want debugging output, use the following macro.  When you hand
  * in, remove the #define DEBUG line. */
-//#define DEBUG
+// #define DEBUG
 #ifdef DEBUG
 # define dbg_printf(...) printf(__VA_ARGS__)
 #else
@@ -34,21 +35,21 @@
 
 /* constants for segregated list */ 
 #define SIZE0 (3)
-#define SIZE1 (1<<2)
-#define SIZE2 (1<<3)
-#define SIZE3 (1<<4)
-#define SIZE4 (1<<5)
-#define SIZE5 (1<<6)
-#define SIZE6 (1<<7)
-#define SIZE7 (1<<8)
-#define SIZE8 (1<<9)
-#define SIZE9 (1<<10)
-#define SIZE10 (1<<11)
-#define SIZE11 (1<<12)
-#define SIZE12 (1<<13)
-#define SIZE13 (1<<14)
-#define SIZE14 (1<<15)
-#define SIZE15 (1<<16)
+#define SIZE1 (1<<1)
+#define SIZE2 (1<<2)
+#define SIZE3 (1<<3)
+#define SIZE4 (1<<4)
+#define SIZE5 (1<<5)
+#define SIZE6 (1<<6)
+#define SIZE7 (1<<7)
+#define SIZE8 (1<<8)
+#define SIZE9 (1<<9)
+#define SIZE10 (1<<10)
+#define SIZE11 (1<<11)
+#define SIZE12 (1<<12)
+#define SIZE13 (1<<13)
+#define SIZE14 (1<<14)
+#define SIZE15 (1<<15)
 
 #define SYS_WORD 8
 #define PTR_NUM 16
@@ -80,15 +81,18 @@
 /* pointer operator */
 #define PRED(bp)			((unsigned long *)bp)
 #define SUCC(bp)			((unsigned long *)bp + 1)
-#define SETD(addr, value)	(*(unsigned long *)(addr) = (value))
+#define SETD(addr, value)	(*(unsigned long *)(addr) = (unsigned long)(value))
 #define GETD(addr)			(*(unsigned long *)(addr))
 
-#define LIST_END	((unsigned long *)-2)
+#define LIST_END	((unsigned long)-2)
 #define GEN_ALLOCSIZE(cl)	( cl==0 ? 3:(1<<(cl+1)) )
+#define GET_NEED_BLK(size)	( (size-1)/DSIZE +1 )
 /* complex helper macro */
-#define CLASS_BP(bp)		get_class( GET_SIZE(HDRP(bp))/WSIZE )
+/* may be smaller than the actual size of bp */
+#define CLASS_BP(bp)		(get_bp_class( GET_SIZE(HDRP(bp)) ))
 
-typedef unsigned long * ptr_t
+
+typedef unsigned long * ptr_t;
 
 static char *heap_listp = NULL;
 static void *free_list = NULL;
@@ -96,107 +100,30 @@ static void *free_list = NULL;
 static ptr_t ptrs = NULL;
 
 static void* coalesce(void *bp);
-static void* heap_extend(size_t num);
-static void * find_free_block(size_t asize);
+static void* heap_extend(int block_num);
+static void * find_free_block(int num);
 static void place(void *bp, size_t size);
 static void printblock(void *bp);
 void mm_checkheap(int verbose);
 static void checkblock(void *bp);
-
+static int get_class(int block_num);
 /* get the ptr to No.x list */
-/* 这个是获取指针,也就是第num表项的值 */
-static ptr_t get_list_ptr(int num)
+static ptr_t get_list_ptr(int num);
+static void append(int list_num, void *bp);
+static void list_remove(int list_num, void *bp);
+static void print_list();
+
+static int get_bp_class(int size)
 {
-	if (ptrs == NULL)
-	{
-		return (ptr_t)-1;
-	}
-	return (ptr_t)GETD( (ptr_t)ptrs + num );
-}
-
-static void append(int list_num, void *bp)
-{
-	ptr_t ptr = get_list_ptr(list_num);
-	if (ptr == (ptr_t)-1)
-	{
-		dbg_printf("Pointer set Error\n");
-		return;
-	}
-
-	if (GETD(ptr) == LIST_END)
-	{
-		SETD( ptr, bp);
-		return;
-	}
-
-	void* crt_bp = (void *)GETD(GETD(ptr));//the first bp
-	while(1)
-	{
-		if ( GETD(SUCC(crt))==LIST_END )
-		{
-			SETD(SUCC(crt), bp);
-			SETD(PRED(bp), crt);
-			SETD(SUCC(bp), LIST_END);
-			break;
-		}
-		crt = GETD(SUCC(crt));
-	}
-}
-
-static void remove(int list_num, void *bp)
-{
-	ptr_t ptr = get_list_ptr(list_num);
-	if (ptr == (ptr_t)-1)
-	{
-		dbg_printf("Pointer set Error\n");
-		return;
-	}
-
-	void *crt_bp = (void *)GETD(GETD(ptr));
-	while(1)
-	{
-		if ( crt_bp == bp)//item to remove
-		{
-			void* pre_bp = (void *)GETD(PRED(bp));
-			SETD( SUCC(pre_bp), GETD( SUCC(crt_bp) ) );
-			if ( GETD(SUCC(pre_bp)) == LIST_END ) break;
-			
-			void *suc_bp = (void *)GETD(SUCC(bp));
-			SETD( PRED(suc_bp), GETD( PRED(crt_bp) ) );
-			break;
-		}
-		crt_bp = (void *)GETD(SUCC(crt_bp));
-	}
-
-}
-
-static int get_class(int block_num)
-{
-	if (block_num >= SIZE15)
+	int valid_blk = size/DSIZE;
+	if (valid_blk >= SIZE15)
 	{
 		return 15;
 	}
-	if (block_num <=3 )
-	{
-		return 0;
-	}
-	int res = block_num;
-	res --;
-	res |= res >> 1;
-	res |= res >> 2;
-	res |= res >> 4;
-	res |= res >> 8;
-	res |= res >> 16;
-	res++;
-	int cnt=0;
-	while(res)
-	{
-		res>>=1;
-		cnt++;
-	}
-	cnt--;
-	return cnt;
+	valid_blk++;
+	return get_class(valid_blk)-1;
 }
+
 /*
  * Initialize: return -1 on error, 0 on success.
  */
@@ -205,7 +132,7 @@ int mm_init(void)
 	//setting up prologue
 
 	//request for the initial ptrs and initialized 0
-	if ( ( ptrs = (mem_sbrk(PTRSEG) ) == (void *)-1 ) )
+	if ( ( ptrs = (ptr_t)mem_sbrk(PTRSEG) ) == (void *)-1 )
 		return -1;
 
 	/* set all to list end at first */
@@ -225,7 +152,7 @@ int mm_init(void)
 	//set up epilogue
 	SETW( heap_listp + 3*WSIZE, PACK(0, 1) );
 	// now extend the heap
-	void *new_block = heap_extend(CHUNKSIZE/WSIZE);
+	void *new_block = heap_extend(CHUNKSIZE/DSIZE);
 	if (new_block == (void *) -1)
 		return -1;
 	heap_listp += (2*WSIZE);
@@ -247,9 +174,14 @@ void *malloc (size_t size)
 	if (size <=0 )//ignore
 		return NULL;
 
-	int class_num = get_class(size/WSIZE);
+	int needed_blks = GET_NEED_BLK(size + DSIZE);
+	if (needed_blks < 3)
+	{
+		needed_blks = 3;
+	}
+	int class_num = get_class(needed_blks);
 	
-	alloc_size = GEN_ALLOCSIZE(class_num);
+	alloc_size = needed_blks * DSIZE;
 
 	/* Notice the semantic of find_free_block has changend */
 	void *free_blk = find_free_block(class_num);
@@ -257,7 +189,7 @@ void *malloc (size_t size)
 	if (free_blk == NULL)
 	{
 		size_t extendsize = MAX(alloc_size, CHUNKSIZE);
-		if( (free_blk = heap_extend(extendsize/WSIZE)) == (void *)-1 )
+		if( (free_blk = heap_extend(extendsize/DSIZE)) == (void *)-1 )
 			return NULL;
 	}
 	dbg_printf("\n [ Mallocing Block ] \nsize\t%ld\talloc_s\t%ld\n",size, alloc_size);
@@ -270,22 +202,24 @@ void *malloc (size_t size)
 static void place(void *bp, size_t size)
 {
 	int original_size = GET_SIZE(HDRP(bp));
-	if (original_size - size < DSIZE*2)
+	if (original_size - size < DSIZE*SIZE0)
 	{
 		SETW(HDRP(bp), PACK(original_size, 1));
 		SETW(FTRP(bp), PACK(original_size, 1));
+		int this_class = CLASS_BP(bp);
+		list_remove(this_class, bp);
 	}
 	else
 	{
 		int this_class = CLASS_BP(bp);
-		remove(this_class, bp);
+		list_remove(this_class, bp);
 		SETW(HDRP(bp), PACK(size, 1));
 		SETW(FTRP(bp), PACK(size, 1));
 		bp = NEXT_BLKP(bp);
-		int next_class = CLASS_BP(bp);
-		append(next_classm, bp);
 		SETW(HDRP(bp), PACK(original_size - size, 0));
 		SETW(FTRP(bp), PACK(original_size - size, 0));
+		int next_class = CLASS_BP(bp);
+		append(next_class, bp);
 	}
 }
 
@@ -302,6 +236,7 @@ void free (void *ptr)
     size_t size = GET_SIZE(HDRP(ptr));
     SETW(HDRP(ptr), PACK(size, 0));
     SETW(FTRP(ptr), PACK(size, 0));
+    append(CLASS_BP(ptr), ptr);
     coalesce(ptr);
 
     dbg_printf("\n [End OF Freeing] \n");
@@ -377,12 +312,207 @@ static int aligned(const void *p) {
     return (size_t)ALIGN(p) == (size_t)p;
 }
 
+/*
+ * Extend the heap by num blocks
+ * Modify To support explicit list
+ */
+static void* heap_extend(int block_num)
+{
+	size_t size = DSIZE * block_num;
+ 	void *result = mem_sbrk(size);
+ 	if (result == (void *)-1)
+ 		return (void *)-1;
+ 	//set up a free block here
+ 	//and set up ptrs
+ 	SETW( HDRP(result), size);
+ 	SETW( FTRP(result), size);
+ 	SETW( HDRP( NEXT_BLKP(result) ), PACK(0, 1));
+
+ 	/* determine which class */
+ 	int cata = CLASS_BP(result);
+
+ 	append(cata, result);
+ 	return coalesce(result);
+}
+
+static void* coalesce(void *bp)
+{
+	size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    size_t size = GET_SIZE(HDRP(bp));
+    int condition = prev_alloc | (next_alloc << 1);
+
+    switch(condition)
+    {
+    	case 3:
+    		return bp;
+    	case 2://next allocated
+    		//remove pre
+    		list_remove( CLASS_BP(PREV_BLKP(bp)), PREV_BLKP(bp) );
+    		list_remove( CLASS_BP(bp), bp );
+    		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        	SETW(FTRP(bp), PACK(size, 0));
+        	SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        	bp = PREV_BLKP(bp);
+        	break;
+        case 1://pre allocated
+        	//list_remove next
+        	list_remove( CLASS_BP(NEXT_BLKP(bp)), NEXT_BLKP(bp) );
+        	list_remove( CLASS_BP(bp), bp );
+        	size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+	        SETW(HDRP(bp), PACK(size, 0));
+	        SETW(FTRP(bp), PACK(size,0));
+	        
+	        break;
+	    case 0://none allocated
+		    list_remove( CLASS_BP(PREV_BLKP(bp)), PREV_BLKP(bp) );
+		    list_remove( CLASS_BP(NEXT_BLKP(bp)), NEXT_BLKP(bp) );
+		    list_remove( CLASS_BP(bp), bp );
+	    	size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
+            GET_SIZE(FTRP(NEXT_BLKP(bp)));
+	        SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+	        SETW(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+	        bp = PREV_BLKP(bp);
+	        break;
+    }
+    /* set up ptrs */
+	append( CLASS_BP(bp), bp);
+
+    return bp;
+}
+
+static void * find_free_block(int class_num)
+{
+	void *ptr = get_list_ptr(class_num);
+	void *bp = (void *)GETD(ptr);
+	int try_class = class_num;
+	while((unsigned long)bp == LIST_END)
+	{
+		try_class++;
+		ptr = get_list_ptr(try_class);
+		bp = (void *)GETD(ptr);
+		if (try_class >15 )
+		{
+			return NULL;
+		}
+	}
+    return bp;
+}
+
+/* checked */
+static int get_class(int block_num)
+{
+	if (block_num >= SIZE15)
+	{
+		return 15;
+	}
+	if (block_num <=3 )
+	{
+		return 0;
+	}
+	int res = block_num;
+	res --;
+	res |= res >> 1;
+	res |= res >> 2;
+	res |= res >> 4;
+	res |= res >> 8;
+	res |= res >> 16;
+	res++;
+	int cnt=0;
+	while(res)
+	{
+		res>>=1;
+		cnt++;
+	}
+	cnt--;
+	return cnt;
+}
+
+/* actually insert */
+/* checked */
+static void append(int list_num, void *bp)
+{
+	ptr_t ptr = get_list_ptr(list_num);
+	if (ptr == (ptr_t)-1)
+	{
+		dbg_printf("Pointer set Error\n");
+		return;
+	}
+
+	/* add to the beginning of a list */
+	if (GETD(ptr) == LIST_END)
+	{
+		SETD( ptr, bp );
+		SETD(SUCC(bp), LIST_END);
+		SETD(PRED(bp), ptr);
+		return;
+	}
+
+	/* there is remaining list item in the list */
+	/* insert to the head of the list */
+
+	void *next_bp = (void *)GETD(ptr);
+	SETD( SUCC(bp), next_bp);
+	SETD( PRED(bp), ptr );
+	SETD( PRED(next_bp), bp );
+	SETD( ptr, bp );
+
+}
+
+/* get the ptr to No.x list */
+/* checked */
+static ptr_t get_list_ptr(int num)
+{
+	if (ptrs == NULL)
+	{
+		return (ptr_t)-1;
+	}
+	return (ptr_t)ptrs + num;
+}
+
+/* remove from list */
+/* checked */
+static void list_remove(int list_num, void *bp)
+{
+	ptr_t ptr = get_list_ptr(list_num);
+	if (ptr == (ptr_t)-1)
+	{
+		dbg_printf("Pointer set Error\n");
+		return;
+	}
+
+	void *crt_bp = (void *)GETD(ptr);
+	while(1)
+	{
+		if ( crt_bp == bp)//item to remove
+		{
+			void* pre_bp = (void *)GETD(PRED(bp));
+			/* 前驱是头表 */
+			if ((ptr_t)pre_bp - (ptr_t)ptrs <16 )
+				SETD( pre_bp, GETD( SUCC(crt_bp) ) );
+			else
+				SETD( SUCC(pre_bp), GETD( SUCC(crt_bp) ) );
+			
+			if ( GETD( SUCC(crt_bp) ) == LIST_END ) break;
+			
+			void *suc_bp = (void *)GETD( SUCC(crt_bp) );
+			SETD( PRED(suc_bp), GETD( PRED(crt_bp) ) );
+
+			break;
+		}
+		crt_bp = (void *)GETD(SUCC(crt_bp));
+	}
+
+}
+
 static void printBlockDetail(void *bp)
 {
-	dbg_printf("Block\t0x%lx\nHeader\t0x%x\nSize\t0x%lx\n", bp, GET(HDRP(bp)), GET_SIZE(HDRP(bp)));
-    dbg_printf("FT ADDR\t0x%lx\n", FTRP(bp));
-    dbg_printf("Footer\t0x%x\n",GET(FTRP(bp)));
-    dbg_printf("Class\t%d\n\n", CLASS_BP(bp));
+	dbg_printf("Block\t0x%lx\nHeader\t0x%x\nSize\t0x%lx\n",
+	 (unsigned long)bp, (unsigned)GET(HDRP(bp)), (unsigned long)GET_SIZE(HDRP(bp)));
+    dbg_printf("FT ADDR\t0x%lx\n", (unsigned long)FTRP(bp));
+    dbg_printf("Footer\t0x%x\n",(unsigned)GET(FTRP(bp)));
+    dbg_printf("Class\t%d\n", CLASS_BP(bp));
+    dbg_printf("PREV\t%lx\tSUCC\t%lx\n\n", GET(PRED(bp)), GET(SUCC(bp)));
 }
 
 static void printblock(void *bp)
@@ -420,7 +550,7 @@ static void dump_heap()
 static void checkblock(void *bp)
 {
     if ((size_t)bp % 8)
-        printf("Error: %lx is not doubleword aligned\n", bp);
+        printf("Error: 0x%lx is not doubleword aligned\n", (unsigned long)bp);
 
    	if ( GET(HDRP(bp)) != GET(FTRP(bp)))
    	{
@@ -450,96 +580,32 @@ void mm_checkheap(int verbose)
         checkblock(bp);
     }
 
+
+
     if (verbose)
         printblock(bp);
     if ((GET_SIZE(HDRP(bp)) != 0) || !(GET_ALLOC(HDRP(bp))))
         printf("Bad epilogue header\n");
+
+
 }
 
-
-/*
- * Extend the heap by num blocks
- * Modify To support explicit list
- */
-static void* heap_extend(size_t num)
+static void print_list()
 {
-	size_t size = WSIZE * ( num%2 ? num+1 : num );
- 	void *result = mem_sbrk(size);
- 	if (result == (void *)-1)
- 		return (void *)-1;
- 	//set up a free block here
- 	//and set up ptrs
- 	SETW( HDRP(result), WSIZE*num);
- 	SETW( FTRP(result), WSIZE*num);
- 	SETW( HDRP( NEXT_BLKP(result) ), PACK(0, 1));
-
- 	/* determine which class */
- 	int cata = get_class(num);
- 	append(cata, result);
- 	return coalesce(result);
-}
-
-static void* coalesce(void *bp)
-{
-	size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-    size_t size = GET_SIZE(HDRP(bp));
-    int condition = prev_alloc | (next_alloc << 1);
-
-    switch(condition)
+	dbg_printf("[Printing List]\n");
+    if (1)
     {
-    	case 3:
-    		return bp;
-    	case 2://next allocated
-    		//remove pre
-    		remove( CLASS_BP(PREV_BLKP(bp)), PREV_BLKP(bp) );
-    		remove( CLASS_BP(bp), bp );
-    		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        	SETW(FTRP(bp), PACK(size, 0));
-        	SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        	bp = PREV_BLKP(bp);
-        	break;
-        case 1://pre allocated
-        	//remove next
-        	remove( CLASS_BP(NEXT_BLKP(bp)), NEXT_BLKP(bp) );
-        	remove( CLASS_BP(bp), bp );
-        	size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-	        SETW(HDRP(bp), PACK(size, 0));
-	        SETW(FTRP(bp), PACK(size,0));
-	        
-	        break;
-	    case 0://none allocated
-		    remove( CLASS_BP(PREV_BLKP(bp)), PREV_BLKP(bp) );
-		    remove( CLASS_BP(NEXT_BLKP(bp)), NEXT_BLKP(bp) );
-		    remove( CLASS_BP(bp), bp );
-	    	size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
-            GET_SIZE(FTRP(NEXT_BLKP(bp)));
-	        SETW(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-	        SETW(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
-	        bp = PREV_BLKP(bp);
-	        break;
+    	int i;
+    	for (i = 0; i < 16; ++i)
+    	{
+    		ptr_t crt = (ptr_t)GETD(get_list_ptr(i));
+    		while(crt != LIST_END)
+    		{
+    			dbg_printf("[List %d]\n",i);
+    			printblock(crt);
+    			crt = GETD(SUCC(crt));
+    		}
+    	}
     }
-    /* set up ptrs */
-	append( CLASS_BP(bp), bp);
-
-    return bp;
-}
-
-static void * find_free_block(int class_num)
-{
-	void *ptr = get_list_ptr(class_num);
-	void *bp = (void *)GETD(ptr);
-	int try_class = class_num;
-	while(bp == LIST_END)
-	{
-		if (try_class >15 )
-		{
-			return NULL;
-		}
-		try_class++;
-		ptr = get_list_ptr(try_class);
-		bp = (void *)GETD(ptr);
-	}
-	remove(class_num, bp);
-    return bp;
+    dbg_printf("[End of printing list]\n");
 }
